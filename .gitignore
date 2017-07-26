@@ -1,0 +1,6 @@
+*.o
+gmon.out
+*.x
+*.swp
+*~
+.gdb_history
