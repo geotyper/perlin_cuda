@@ -1,24 +1,33 @@
 #pragma once
 
-#include "common.hpp"
+#include <array>
+#include <cstdint>
 #include <SFML/Graphics.hpp>
 #include <SFML/System.hpp>
+#include "common.hpp"
 
-class PerlinDisplayer final {
-	const World world;
-	const float step;
-	const int winWidth, winHeight;
-	const size_t NOISE_MEM_SIZE;
-
-	sf::RenderWindow window;
-	float *hNoise;
-	uint8_t *pixels;
-
-	void eventLoop();
-	void copyData(float *dNoise);
+class Displayer final : public EventHandler {
 public:
-	PerlinDisplayer(World world, float step);
-	~PerlinDisplayer();
+	static constexpr size_t WIN_WIDTH = 1920,
+	                        WIN_HEIGHT = 1080;
 
-	void display(float *dNoise);
+private:
+	sf::RenderWindow window;
+	sf::Texture tex;
+
+	bool _shouldRedraw = false;
+
+	sf::View keepRatio(const sf::Event::SizeEvent& size, const sf::Vector2u& designedsize);
+
+public:
+	Displayer();
+	~Displayer();
+
+	bool handleEvent(sf::Event event) override;
+
+	void update(uint8_t *hPixels);
+	void draw();
+	bool shouldRedraw() const { return _shouldRedraw; }
+	
+	sf::RenderWindow& getWindow() { return window; }
 };

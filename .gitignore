@@ -4,3 +4,4 @@ gmon.out
 *.swp
 *~
 .gdb_history
+old/

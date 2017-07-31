@@ -1,9 +1,8 @@
 #pragma once
 
-struct World {
-	const float width;
-	const float height;
+#include <SFML/Graphics.hpp>
 
-	World(float w, float h) : width(w), height(h) {}
+class EventHandler {
+public:
+	virtual bool handleEvent(sf::Event evt) = 0;
 };
-

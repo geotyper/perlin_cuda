@@ -1,48 +1,55 @@
+#include "display.hpp"
 #include "myutils.hpp"
 #include "noise.hpp"
-#include "display.hpp"
+#include <curand.h>
+#include <iostream>
+#include <array>
 
-#define SZ(x) static_cast<size_t>(x)
+using std::cout;
+using std::endl;
 
-/*
- * Steps for the Perlin (2d) noise:
- *
- * 1. Fill the grid with random gradient vectors
- * 2. For each point (x,y) of the world, calculate the dot product between the point and each of the
- *    corners of the grid cell the point falls into
- * 3. Interpolate the 4 obtained values for each point
- */
-int main(int argc, char **argv) {
+int main() {
+	Displayer displayer;
+	sf::RenderWindow& window = displayer.getWindow();
+	Perlin perlin;
 
-	auto seed = 0LLU;
-	if (argc > 1) {
-		seed = atoi(argv[1]);
+	uint8_t *hPixels;
+	MUST(cudaMallocHost(&hPixels, 4 * Displayer::WIN_WIDTH * Displayer::WIN_HEIGHT * sizeof(uint8_t)));
+
+	constexpr auto N_STREAMS = 2;
+	cudaStream_t streams[N_STREAMS];
+	for (int i = 0; i < N_STREAMS; ++i) {
+		MUST(cudaStreamCreate(&streams[i]));
 	}
 
-	const World world(3, 3);
-	const size_t GRID_SIZE = SZ(world.width) * SZ(world.height);
-	const size_t GRID_MEM_SIZE = sizeof(float) * 2 * GRID_SIZE;
-	const size_t GRID_MEM_HALF_SIZE = sizeof(float) * GRID_SIZE;
+	perlin.calculate(hPixels, streams, N_STREAMS);
+	/*for (int i = 0; i < 4 * Displayer::WIN_WIDTH * Displayer::WIN_HEIGHT * sizeof(uint8_t); ++i) {*/
+		/*cout << "pixel[" << i << "] = " << int(hPixels[i]) << endl;*/
+	/*}*/
+	displayer.update(hPixels);
 
-	auto step = .05f;
-	PerlinDisplayer displayer(world, step);
+	while (window.isOpen()) {
+		
+		// Event loop
+		sf::Event evt;
+		while (window.pollEvent(evt)) {
+			if (displayer.handleEvent(evt))
+				break;
+			/*if (input.handleEvent(evt))*/
+				/*break;*/
+		}
 
-	auto dGrid = fillGrid(SZ(world.width), SZ(world.height), seed);
+		bool shouldRedraw = displayer.shouldRedraw();
 
-	float *dResult;
-	MUST(cudaMalloc(&dResult, sizeof(float) * SZ(world.width / step) * SZ(world.height / step)));
+		/*if (input.shouldRecalculate()) {*/
+			/*// Recalculate perlin*/
 
-	dim3 threads(nThreads(SZ(world.width / step), 32), nThreads(SZ(world.height / step), 32));
-	dim3 blocks(nBlocks(SZ(world.width / step), 32), nBlocks(SZ(world.height / step), 32));
-	std::cout << "Total " << (world.width/step)*(world.height/step) << ": using " << blocks << " blocks and " << threads << " threads." << std::endl;
-	perlin<<<blocks, threads>>>(world, dGrid, step, dResult);
-	/*shit<<<b, t>>>();*/
-	cudaDeviceSynchronize();
+			/*displayer.update(dPixels);*/
+			/*shouldRedraw = true;*/
+		/*}*/
 
-	/*return;*/
-
-	displayer.display(dResult);
-
-	MUST(cudaFree(dResult));
-	freeGrid(dGrid);
+		if (shouldRedraw) {
+			displayer.draw();
+		}
+	}
 }
