@@ -9,5 +9,5 @@ public:
 	Perlin();
 	~Perlin();
 
-	void calculate(uint8_t *hPixels, cudaStream_t *streams, int nStreams);
+	void calculate(uint8_t *hPixels, float ppu, int seed, cudaStream_t *streams, int nStreams);
 };

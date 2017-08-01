@@ -7,7 +7,7 @@
 #include <cstdio>
 #include <iostream>
 
-#define hash(a, ignore1, ignore2) _hash[a]
+#define INTERP lerp
 
 static constexpr auto INVSQRT2 = .70710678118654752440;
 static constexpr auto N_GRADIENTS = 8;
@@ -43,6 +43,10 @@ __device__ float gradientY[N_GRADIENTS] = {
 	/*return static_cast<int>(x + 13 * (y + 23 * seed)) % N_GRADIENTS;*/
 /*}*/
 
+__inline__ __device__ float smooth(float t) {
+	return t * t * t * (t * (t * 6.f - 15.f) + 10.f);
+}
+
 /*
  * @param x Grid coordinate x
  * @param y Grid coordinate y (top-left = (0, 0))
@@ -53,23 +57,26 @@ __device__ float noiseAt(float x, float y, int seed) {
 	const int ix = static_cast<int>(x),
 	          iy = static_cast<int>(y);
 
+	// Weights
+	const float wx = x - ix,
+	            wy = y - iy;
+
 	// Get gradients at cell corners
-	const int ix0 = static_cast<int>(floor(x)) & 255,
-	          iy0 = static_cast<int>(floor(y)) & 255;
+	const int ix0 = ix & 255,
+	          iy0 = iy & 255;
+	const int ix1 = ix0 + 1,
+	          iy1 = iy0 + 1;
 	const int h0 = _hash[ix0],
-	          h1 = _hash[ix0 + 1];
-	const int iTL = _hash[h0 + iy0] % N_GRADIENTS,
-	          iTR = _hash[h1 + iy0] % N_GRADIENTS,
-	          iBL = _hash[h0 + iy0 + 1] % N_GRADIENTS,
-	          iBR = _hash[h1 + iy0 + 1] % N_GRADIENTS;
+	          h1 = _hash[ix1];
+	const int iTL = (_hash[h0 + iy0] + seed) % N_GRADIENTS,
+	          iTR = (_hash[h1 + iy0] + seed) % N_GRADIENTS,
+	          iBL = (_hash[h0 + iy1] + seed) % N_GRADIENTS,
+	          iBR = (_hash[h1 + iy1] + seed) % N_GRADIENTS;
 	/*CUDASSERT(iTL < 8 && iTR < 8 && iBL < 8 && iBR < 8, "OMG");*/
 	const float2 gTopLeft  = make_float2(gradientX[iTL], gradientY[iTL]);
 	const float2 gTopRight = make_float2(gradientX[iTR], gradientY[iTR]);
 	const float2 gBotLeft  = make_float2(gradientX[iBL], gradientY[iBL]);
 	const float2 gBotRight = make_float2(gradientX[iBR], gradientY[iBR]);
-
-	const float wx = x - ix,
-	            wy = y - iy;
 
 	// Calculate dots between distance and gradient vectors
 	const float dTopLeft  = dot(gTopLeft,  make_float2(wx,     wy));
@@ -77,10 +84,13 @@ __device__ float noiseAt(float x, float y, int seed) {
 	const float dBotLeft  = dot(gBotLeft,  make_float2(wx,     wy - 1));
 	const float dBotRight = dot(gBotRight, make_float2(wx - 1, wy - 1));
 
-	const float leftInterp = lerp(dTopLeft, dBotLeft, wy);
-	const float rightInterp = lerp(dTopRight, dBotRight, wy);
+	const float tx = smooth(wx),
+	            ty = smooth(wy);
 
-	return lerp(leftInterp, rightInterp, wx);
+	const float leftInterp  = lerp(dTopLeft, dBotLeft, ty);
+	const float rightInterp = lerp(dTopRight, dBotRight, ty);
+
+	return (lerp(leftInterp, rightInterp, tx) + 1.0) * 0.5;
 }
 
 __global__ void perlin(int yStart, int height, int seed, float ppu, uint8_t *outPixels) {
@@ -91,12 +101,13 @@ __global__ void perlin(int yStart, int height, int seed, float ppu, uint8_t *out
 	if (px >= Displayer::WIN_WIDTH || py >= yStart + height)
 		return;
 
-	const auto noise = noiseAt(px / ppu, py / ppu, seed);
+	auto noise = noiseAt(px / ppu, py / ppu, seed);
 
 	// Convert noise to pixel
 	const auto baseIdx = 4 * LIN(px, py, Displayer::WIN_WIDTH);
 
 	const auto val = noise * 255;
+
 	outPixels[baseIdx + 0] = val;
 	outPixels[baseIdx + 1] = val;
 	outPixels[baseIdx + 2] = val;
@@ -118,10 +129,8 @@ __global__ void foo(uint8_t *out) {
 	/*out[px] = 255;*/
 }
 
-void Perlin::calculate(uint8_t *hPixels, cudaStream_t *streams, int nStreams) {
+void Perlin::calculate(uint8_t *hPixels, float ppu, int seed, cudaStream_t *streams, int nStreams) {
 	
-	const auto ppu = 10.f;
-
 	const auto partialHeight = Displayer::WIN_HEIGHT / nStreams;
 	const dim3 threads(32, 32);
 	const dim3 blocks(std::ceil(Displayer::WIN_WIDTH / 32.0), std::ceil(partialHeight / 32.0));
@@ -131,7 +140,7 @@ void Perlin::calculate(uint8_t *hPixels, cudaStream_t *streams, int nStreams) {
 	std::cout << "threads = " << threads << ", blocks = " << blocks << " ( = " << threads.x * blocks.x * threads.y * blocks.y << ")" << std::endl;
 
 	for (int i = 0; i < nStreams; ++i) {
-		perlin<<<threads, blocks, 0, streams[i]>>>(partialHeight * i, partialHeight, 0, ppu, dPixels);
+		perlin<<<threads, blocks, 0, streams[i]>>>(partialHeight * i, partialHeight, seed, ppu, dPixels);
 	}
 
 	MUST(cudaMemcpy(hPixels, dPixels, sizeof(uint8_t) * 4 * Displayer::WIN_WIDTH * Displayer::WIN_HEIGHT,

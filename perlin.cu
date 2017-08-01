@@ -9,7 +9,15 @@
 using std::cout;
 using std::endl;
 
-int main() {
+int main(int argc, char **argv) {
+
+	float ppu = 100.f;
+	int seed = 0;
+	if (argc > 1) {
+		ppu = atof(argv[1]);
+		if (argc > 2)
+			seed = atoi(argv[2]);
+	}
 	Displayer displayer;
 	sf::RenderWindow& window = displayer.getWindow();
 	Perlin perlin;
@@ -23,7 +31,7 @@ int main() {
 		MUST(cudaStreamCreate(&streams[i]));
 	}
 
-	perlin.calculate(hPixels, streams, N_STREAMS);
+	perlin.calculate(hPixels, ppu, seed, streams, N_STREAMS);
 	/*for (int i = 0; i < 4 * Displayer::WIN_WIDTH * Displayer::WIN_HEIGHT * sizeof(uint8_t); ++i) {*/
 		/*cout << "pixel[" << i << "] = " << int(hPixels[i]) << endl;*/
 	/*}*/
