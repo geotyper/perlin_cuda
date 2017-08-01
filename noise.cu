@@ -20,7 +20,7 @@ __device__ float gradientY[] = {
  * @param y Grid coordinate y (top-left = (0, 0))
  */
 __device__ float noiseAt(float x, float y, int seed) {
-	return 0;
+	return 0.5;
 }
 
 __global__ void perlin(int yStart, int height, int seed, float ppu, uint8_t *outPixels) {
@@ -31,14 +31,15 @@ __global__ void perlin(int yStart, int height, int seed, float ppu, uint8_t *out
 	if (px >= Displayer::WIN_WIDTH || py >= yStart + height)
 		return;
 
-	/*const auto noise = noiseAt(px / ppu, py / ppu, seed);*/
+	const auto noise = noiseAt(px / ppu, py / ppu, seed);
 
 	// Convert noise to pixel
 	const auto baseIdx = 4 * LIN(px, py, Displayer::WIN_WIDTH);
-	/*const auto val = noise * 255;*/
-	outPixels[baseIdx + 0] = 255;
-	outPixels[baseIdx + 1] = 255;
-	outPixels[baseIdx + 2] = 255;
+
+	const auto val = noise * 255;
+	outPixels[baseIdx + 0] = val;
+	outPixels[baseIdx + 1] = val;
+	outPixels[baseIdx + 2] = val;
 	outPixels[baseIdx + 3] = 255;
 }
 
@@ -62,19 +63,18 @@ void Perlin::calculate(uint8_t *hPixels, cudaStream_t *streams, int nStreams) {
 	const auto partialHeight = Displayer::WIN_HEIGHT / nStreams;
 	printf("partialHeight = %d\n", partialHeight);
 	const dim3 threads(32, 32);
-	const dim3 blocks(std::ceil(Displayer::WIN_WIDTH / 32), std::ceil(partialHeight / 32));
+	const dim3 blocks(std::ceil(Displayer::WIN_WIDTH / 32.0), std::ceil(partialHeight / 32.0));
 
 	MUST(cudaMalloc(&dPixels, sizeof(uint8_t) * 4 * Displayer::WIN_WIDTH * Displayer::WIN_HEIGHT));
 
 	std::cout << "threads = " << threads << ", blocks = " << blocks << " ( = " << threads.x * blocks.x * threads.y * blocks.y << ")" << std::endl;
 
 	for (int i = 0; i < nStreams; ++i) {
-		perlin<<<threads, blocks>>>(partialHeight * i, partialHeight, 0, 1, dPixels);
-		MUST(cudaMemcpyAsync(hPixels + 4 * partialHeight * i * sizeof(uint8_t),
-				dPixels + 4 * partialHeight * i * sizeof(uint8_t),
-				4 * sizeof(uint8_t) * partialHeight,
-				cudaMemcpyDeviceToHost, streams[i]));
+		perlin<<<threads, blocks, 0, streams[i]>>>(partialHeight * i, partialHeight, 0, 1, dPixels);
 	}
+
+	MUST(cudaMemcpy(hPixels, dPixels, sizeof(uint8_t) * 4 * Displayer::WIN_WIDTH * Displayer::WIN_HEIGHT,
+				cudaMemcpyDeviceToHost));
 
 	MUST(cudaFree(dPixels));
 }

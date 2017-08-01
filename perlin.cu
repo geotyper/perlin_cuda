@@ -4,6 +4,7 @@
 #include <curand.h>
 #include <iostream>
 #include <array>
+#include <unistd.h>
 
 using std::cout;
 using std::endl;
@@ -16,7 +17,7 @@ int main() {
 	uint8_t *hPixels;
 	MUST(cudaMallocHost(&hPixels, 4 * Displayer::WIN_WIDTH * Displayer::WIN_HEIGHT * sizeof(uint8_t)));
 
-	constexpr auto N_STREAMS = 2;
+	constexpr auto N_STREAMS = 4;
 	cudaStream_t streams[N_STREAMS];
 	for (int i = 0; i < N_STREAMS; ++i) {
 		MUST(cudaStreamCreate(&streams[i]));
@@ -51,5 +52,7 @@ int main() {
 		if (shouldRedraw) {
 			displayer.draw();
 		}
+
+		usleep(16666);
 	}
 }

@@ -1,5 +1,5 @@
 CC = nvcc
-CFLAGS = -std=c++11 --compiler-options -Wall --compiler-options -Wextra --compiler-options -ggdb --compiler-options -fopenmp
+CFLAGS = -arch sm_30 -std=c++11 --compiler-options -Wall --compiler-options -Wextra --compiler-options -ggdb --compiler-options -fopenmp
 LDFLAGS = -lsfml-graphics -lsfml-window -lsfml-system -lcurand
 
 all: perlin
