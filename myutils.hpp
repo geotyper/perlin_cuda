@@ -23,6 +23,11 @@
 
 #define CUID(x) (blockDim.x * blockIdx.x + threadIdx.x)
 
+#define CUDASSERT(cond, msg) \
+	if (!cond) { \
+		printf("assertion failed at " __FILE__ ":%d -> %s\n", __LINE__, msg); \
+	}
+
 template<typename T>
 constexpr size_t nThreads(T n, size_t max = 1024) {
 	return std::min(static_cast<size_t>(max), n);
