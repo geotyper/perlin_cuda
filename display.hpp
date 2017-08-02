@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <initializer_list>
 #include <SFML/Graphics.hpp>
 #include <SFML/System.hpp>
 #include "common.hpp"
@@ -26,7 +27,7 @@ public:
 	bool handleEvent(sf::Event event) override;
 
 	void update(uint8_t *hPixels);
-	void draw();
+	void draw(std::initializer_list<sf::Drawable*> toDraw);
 	bool shouldRedraw() const { return _shouldRedraw; }
 	
 	sf::RenderWindow& getWindow() { return window; }

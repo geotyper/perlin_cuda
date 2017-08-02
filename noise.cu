@@ -64,15 +64,14 @@ __device__ float noiseAt(float x, float y, int seed) {
 	// Get gradients at cell corners
 	const int ix0 = ix & 255,
 	          iy0 = iy & 255;
-	const int ix1 = ix0 + 1,
-	          iy1 = iy0 + 1;
+	const int ix1 = (ix0 + 1) & 255,
+	          iy1 = (iy0 + 1) & 255;
 	const int h0 = _hash[ix0],
 	          h1 = _hash[ix1];
 	const int iTL = (_hash[h0 + iy0] + seed) % N_GRADIENTS,
 	          iTR = (_hash[h1 + iy0] + seed) % N_GRADIENTS,
 	          iBL = (_hash[h0 + iy1] + seed) % N_GRADIENTS,
 	          iBR = (_hash[h1 + iy1] + seed) % N_GRADIENTS;
-	/*CUDASSERT(iTL < 8 && iTR < 8 && iBL < 8 && iBR < 8, "OMG");*/
 	const float2 gTopLeft  = make_float2(gradientX[iTL], gradientY[iTL]);
 	const float2 gTopRight = make_float2(gradientX[iTR], gradientY[iTR]);
 	const float2 gBotLeft  = make_float2(gradientX[iBL], gradientY[iBL]);
@@ -93,7 +92,21 @@ __device__ float noiseAt(float x, float y, int seed) {
 	return (lerp(leftInterp, rightInterp, tx) + 1.0) * 0.5;
 }
 
-__global__ void perlin(int yStart, int height, int seed, float ppu, uint8_t *outPixels) {
+__device__ float sumOctaves(float x, float y, NoiseParams params) {
+	float frequency = 1;
+	float sum = noiseAt(x * frequency , y * frequency, params.seed);
+	float amplitude = 1;
+	float range = 1;
+	for (int i = 1; i < params.octaves; i++) {
+		frequency *= params.lacunarity;
+		amplitude *= params.persistence;
+		range += amplitude;
+		sum += amplitude * noiseAt(x * frequency, y * frequency, params.seed);
+	}
+	return sum / range;
+}
+
+__global__ void perlin(int yStart, int height, NoiseParams params, uint8_t *outPixels) {
 	// Pixel coordinates
 	const auto px = CUID(x);
 	const auto py = CUID(y) + yStart;
@@ -101,7 +114,7 @@ __global__ void perlin(int yStart, int height, int seed, float ppu, uint8_t *out
 	if (px >= Displayer::WIN_WIDTH || py >= yStart + height)
 		return;
 
-	auto noise = noiseAt(px / ppu, py / ppu, seed);
+	auto noise = sumOctaves(px / params.ppu, py / params.ppu, params);
 
 	// Convert noise to pixel
 	const auto baseIdx = 4 * LIN(px, py, Displayer::WIN_WIDTH);
@@ -129,7 +142,7 @@ __global__ void foo(uint8_t *out) {
 	/*out[px] = 255;*/
 }
 
-void Perlin::calculate(uint8_t *hPixels, float ppu, int seed, cudaStream_t *streams, int nStreams) {
+void Perlin::calculate(uint8_t *hPixels, NoiseParams params, cudaStream_t *streams, int nStreams) {
 	
 	const auto partialHeight = Displayer::WIN_HEIGHT / nStreams;
 	const dim3 threads(32, 32);
@@ -137,10 +150,10 @@ void Perlin::calculate(uint8_t *hPixels, float ppu, int seed, cudaStream_t *stre
 
 	MUST(cudaMalloc(&dPixels, sizeof(uint8_t) * 4 * Displayer::WIN_WIDTH * Displayer::WIN_HEIGHT));
 
-	std::cout << "threads = " << threads << ", blocks = " << blocks << " ( = " << threads.x * blocks.x * threads.y * blocks.y << ")" << std::endl;
+	std::cout << "threads = " << threads << ", blocks = " << blocks << " (= " << threads.x * blocks.x * threads.y * blocks.y << ")" << std::endl;
 
 	for (int i = 0; i < nStreams; ++i) {
-		perlin<<<threads, blocks, 0, streams[i]>>>(partialHeight * i, partialHeight, seed, ppu, dPixels);
+		perlin<<<threads, blocks, 0, streams[i]>>>(partialHeight * i, partialHeight, params, dPixels);
 	}
 
 	MUST(cudaMemcpy(hPixels, dPixels, sizeof(uint8_t) * 4 * Displayer::WIN_WIDTH * Displayer::WIN_HEIGHT,

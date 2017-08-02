@@ -1,6 +1,7 @@
 #include "display.hpp"
 #include "myutils.hpp"
 #include "noise.hpp"
+#include "input.hpp"
 #include <curand.h>
 #include <iostream>
 #include <array>
@@ -11,14 +12,20 @@ using std::endl;
 
 int main(int argc, char **argv) {
 
-	float ppu = 100.f;
-	int seed = 0;
+	NoiseParams params;
+	params.ppu = 200.f;
+	params.seed = 0;
+	params.octaves = 3;
+	params.lacunarity = 2;
+	params.persistence = 0.5;
 	if (argc > 1) {
-		ppu = atof(argv[1]);
+		params.ppu = atof(argv[1]);
 		if (argc > 2)
-			seed = atoi(argv[2]);
+			params.seed = atoi(argv[2]);
 	}
+
 	Displayer displayer;
+	Input input(params);
 	sf::RenderWindow& window = displayer.getWindow();
 	Perlin perlin;
 
@@ -31,7 +38,7 @@ int main(int argc, char **argv) {
 		MUST(cudaStreamCreate(&streams[i]));
 	}
 
-	perlin.calculate(hPixels, ppu, seed, streams, N_STREAMS);
+	perlin.calculate(hPixels, params, streams, N_STREAMS);
 	/*for (int i = 0; i < 4 * Displayer::WIN_WIDTH * Displayer::WIN_HEIGHT * sizeof(uint8_t); ++i) {*/
 		/*cout << "pixel[" << i << "] = " << int(hPixels[i]) << endl;*/
 	/*}*/
@@ -41,24 +48,27 @@ int main(int argc, char **argv) {
 		
 		// Event loop
 		sf::Event evt;
+		bool shouldRecalculate = false;
 		while (window.pollEvent(evt)) {
 			if (displayer.handleEvent(evt))
 				break;
-			/*if (input.handleEvent(evt))*/
-				/*break;*/
+			if (input.handleEvent(evt)) {
+				shouldRecalculate = true;
+				break;
+			}
 		}
 
 		bool shouldRedraw = displayer.shouldRedraw();
 
-		/*if (input.shouldRecalculate()) {*/
-			/*// Recalculate perlin*/
-
-			/*displayer.update(dPixels);*/
-			/*shouldRedraw = true;*/
-		/*}*/
+		if (shouldRecalculate) {
+			// Recalculate perlin
+			perlin.calculate(hPixels, params, streams, N_STREAMS);
+			displayer.update(hPixels);
+			shouldRedraw = true;
+		}
 
 		if (shouldRedraw) {
-			displayer.draw();
+			displayer.draw({&input});
 		}
 
 		usleep(16666);

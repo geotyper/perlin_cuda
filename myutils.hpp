@@ -24,7 +24,7 @@
 #define CUID(x) (blockDim.x * blockIdx.x + threadIdx.x)
 
 #define CUDASSERT(cond, msg) \
-	if (!cond) { \
+	if (!(cond)) { \
 		printf("assertion failed at " __FILE__ ":%d -> %s\n", __LINE__, msg); \
 	}
 

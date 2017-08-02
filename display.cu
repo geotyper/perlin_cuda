@@ -17,12 +17,14 @@ void Displayer::update(uint8_t *hPixels) {
 	tex.update(hPixels);
 }
 
-void Displayer::draw() {
+void Displayer::draw(std::initializer_list<sf::Drawable*> toDraw) {
 	sf::Sprite sprite(tex);
 	// hPixels contains RGBA values for the texture's pixels
 
 	window.clear();
 	window.draw(sprite);
+	for (auto d : toDraw)
+		window.draw(*d);
 	window.display();
 }
 

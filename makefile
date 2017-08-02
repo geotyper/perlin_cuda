@@ -5,10 +5,10 @@ LDFLAGS = -lsfml-graphics -lsfml-window -lsfml-system -lcurand
 
 all: perlin
 
-perlin: perlin.o display.o noise.o
+perlin: perlin.o display.o noise.o input.o
 	$(CC) $(INCS) $(CFLAGS) $^ -o $@.x $(LDFLAGS)
 
-%.o: %.cu myutils.hpp display.hpp noise.hpp
+%.o: %.cu myutils.hpp display.hpp noise.hpp input.hpp
 	$(CC) $(INCS) $(CFLAGS) $< -c
 
 .PHONY: clean
