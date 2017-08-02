@@ -32,17 +32,19 @@ int main(int argc, char **argv) {
 	uint8_t *hPixels;
 	MUST(cudaMallocHost(&hPixels, 4 * Displayer::WIN_WIDTH * Displayer::WIN_HEIGHT * sizeof(uint8_t)));
 
-	constexpr auto N_STREAMS = 4;
+	constexpr auto N_STREAMS = 2;
 	cudaStream_t streams[N_STREAMS];
 	for (int i = 0; i < N_STREAMS; ++i) {
 		MUST(cudaStreamCreate(&streams[i]));
 	}
 
-	perlin.calculate(hPixels, params, streams, N_STREAMS);
+	auto stats = perlin.calculate(hPixels, params, streams, N_STREAMS);
 	/*for (int i = 0; i < 4 * Displayer::WIN_WIDTH * Displayer::WIN_HEIGHT * sizeof(uint8_t); ++i) {*/
 		/*cout << "pixel[" << i << "] = " << int(hPixels[i]) << endl;*/
 	/*}*/
 	displayer.update(hPixels);
+
+	std::cout << stats << std::endl;
 
 	while (window.isOpen()) {
 		
@@ -62,9 +64,10 @@ int main(int argc, char **argv) {
 
 		if (shouldRecalculate) {
 			// Recalculate perlin
-			perlin.calculate(hPixels, params, streams, N_STREAMS);
+			stats = perlin.calculate(hPixels, params, streams, N_STREAMS);
 			displayer.update(hPixels);
 			shouldRedraw = true;
+			std::cout << stats << std::endl;
 		}
 
 		if (shouldRedraw) {
@@ -73,4 +76,10 @@ int main(int argc, char **argv) {
 
 		usleep(16666);
 	}
+
+	// Cleanup
+	for (int i = 0; i < N_STREAMS; ++i) {
+		MUST(cudaStreamDestroy(streams[i]));
+	}
+	MUST(cudaFreeHost(hPixels));
 }

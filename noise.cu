@@ -7,8 +7,6 @@
 #include <cstdio>
 #include <iostream>
 
-#define INTERP lerp
-
 static constexpr auto INVSQRT2 = .70710678118654752440;
 static constexpr auto N_GRADIENTS = 8;
 
@@ -38,10 +36,6 @@ __device__ float gradientX[N_GRADIENTS] = {
 __device__ float gradientY[N_GRADIENTS] = {
 	0, 0, 1, -1, INVSQRT2, INVSQRT2, -INVSQRT2, -INVSQRT2
 };
-
-/*__inline__ __device__ int hash(float x, float y, int seed) {*/
-	/*return static_cast<int>(x + 13 * (y + 23 * seed)) % N_GRADIENTS;*/
-/*}*/
 
 __inline__ __device__ float smooth(float t) {
 	return t * t * t * (t * (t * 6.f - 15.f) + 10.f);
@@ -127,37 +121,57 @@ __global__ void perlin(int yStart, int height, NoiseParams params, uint8_t *outP
 	outPixels[baseIdx + 3] = 255;
 }
 
-Perlin::Perlin() {}
-
-Perlin::~Perlin() {}
-
-__global__ void foo(uint8_t *out) {
-	const auto px = CUID(x);
-	const auto py = CUID(y);
-
-	if (px >= Displayer::WIN_WIDTH || py >= Displayer::WIN_HEIGHT)
-		return;
-
-	out[LIN(px, py, Displayer::WIN_WIDTH)] = 255;
-	/*out[px] = 255;*/
-}
-
-void Perlin::calculate(uint8_t *hPixels, NoiseParams params, cudaStream_t *streams, int nStreams) {
+Stats Perlin::calculate(uint8_t *hPixels, NoiseParams params, cudaStream_t *streams, int nStreams) {
 	
 	const auto partialHeight = Displayer::WIN_HEIGHT / nStreams;
 	const dim3 threads(32, 32);
 	const dim3 blocks(std::ceil(Displayer::WIN_WIDTH / 32.0), std::ceil(partialHeight / 32.0));
 
+	cudaEvent_t start, endMalloc, endKernel, endMemcpy;
+	MUST(cudaEventCreate(&start));
+	MUST(cudaEventCreate(&endMalloc));
+	MUST(cudaEventCreate(&endKernel));
+	MUST(cudaEventCreate(&endMemcpy));
+
+	MUST(cudaEventRecord(start));
 	MUST(cudaMalloc(&dPixels, sizeof(uint8_t) * 4 * Displayer::WIN_WIDTH * Displayer::WIN_HEIGHT));
+	MUST(cudaEventRecord(endMalloc));
 
 	std::cout << "threads = " << threads << ", blocks = " << blocks << " (= " << threads.x * blocks.x * threads.y * blocks.y << ")" << std::endl;
 
 	for (int i = 0; i < nStreams; ++i) {
 		perlin<<<threads, blocks, 0, streams[i]>>>(partialHeight * i, partialHeight, params, dPixels);
 	}
+	MUST(cudaDeviceSynchronize());
+	MUST(cudaEventRecord(endKernel));
 
 	MUST(cudaMemcpy(hPixels, dPixels, sizeof(uint8_t) * 4 * Displayer::WIN_WIDTH * Displayer::WIN_HEIGHT,
 				cudaMemcpyDeviceToHost));
+	MUST(cudaEventRecord(endMemcpy));
 
+	MUST(cudaEventSynchronize(start));
+	MUST(cudaEventSynchronize(endMalloc));
+	MUST(cudaEventSynchronize(endKernel));
+	MUST(cudaEventSynchronize(endMemcpy));
+
+	// Collect stats
+	float tMalloc, tKernel, tMemcpy;
+	MUST(cudaEventElapsedTime(&tMalloc, start, endMalloc));
+	MUST(cudaEventElapsedTime(&tKernel, start, endKernel));
+	MUST(cudaEventElapsedTime(&tMemcpy, start, endMemcpy));
+	Stats stats;
+	stats.tMalloc = tMalloc;
+	stats.tKernel = tKernel - tMalloc;
+	stats.tMemcpy = tMemcpy - tMalloc - tKernel;
+	stats.tTotal = tMemcpy;
+	
+	// Cleanup
 	MUST(cudaFree(dPixels));
+
+	MUST(cudaEventDestroy(endMemcpy));
+	MUST(cudaEventDestroy(endKernel));
+	MUST(cudaEventDestroy(endMalloc));
+	MUST(cudaEventDestroy(start));
+
+	return stats;
 }
