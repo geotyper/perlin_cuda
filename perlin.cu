@@ -13,16 +13,17 @@ using std::endl;
 int main(int argc, char **argv) {
 
 	NoiseParams params;
-	params.ppu = 200.f;
+	// Default parameters
+	params.ppu = 250.f;
 	params.seed = 0;
 	params.octaves = 3;
 	params.lacunarity = 2;
 	params.persistence = 0.5;
+	int nStreams = 2;
 	if (argc > 1) {
-		params.ppu = atof(argv[1]);
-		if (argc > 2)
-			params.seed = atoi(argv[2]);
+		nStreams = std::min(100, atoi(argv[1]));
 	}
+	std::cout << "Using " << nStreams << " CUDA streams." << std::endl;
 
 	Displayer displayer;
 	Input input(params);
@@ -32,13 +33,12 @@ int main(int argc, char **argv) {
 	uint8_t *hPixels;
 	MUST(cudaMallocHost(&hPixels, 4 * Displayer::WIN_WIDTH * Displayer::WIN_HEIGHT * sizeof(uint8_t)));
 
-	constexpr auto N_STREAMS = 2;
-	cudaStream_t streams[N_STREAMS];
-	for (int i = 0; i < N_STREAMS; ++i) {
+	cudaStream_t *streams = new cudaStream_t[nStreams];
+	for (int i = 0; i < nStreams; ++i) {
 		MUST(cudaStreamCreate(&streams[i]));
 	}
 
-	auto stats = perlin.calculate(hPixels, params, streams, N_STREAMS);
+	auto stats = perlin.calculate(hPixels, params, streams, nStreams);
 	/*for (int i = 0; i < 4 * Displayer::WIN_WIDTH * Displayer::WIN_HEIGHT * sizeof(uint8_t); ++i) {*/
 		/*cout << "pixel[" << i << "] = " << int(hPixels[i]) << endl;*/
 	/*}*/
@@ -64,22 +64,23 @@ int main(int argc, char **argv) {
 
 		if (shouldRecalculate) {
 			// Recalculate perlin
-			stats = perlin.calculate(hPixels, params, streams, N_STREAMS);
+			stats = perlin.calculate(hPixels, params, streams, nStreams);
 			displayer.update(hPixels);
 			shouldRedraw = true;
 			std::cout << stats << std::endl;
 		}
 
 		if (shouldRedraw) {
-			displayer.draw({&input});
+			displayer.draw({ &input });
 		}
 
 		usleep(16666);
 	}
 
 	// Cleanup
-	for (int i = 0; i < N_STREAMS; ++i) {
+	for (int i = 0; i < nStreams; ++i) {
 		MUST(cudaStreamDestroy(streams[i]));
 	}
 	MUST(cudaFreeHost(hPixels));
+	delete[] streams;
 }

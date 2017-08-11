@@ -7,11 +7,11 @@
 #include <iomanip>
 
 struct NoiseParams {
-	float ppu;
+	float ppu;         // pixels per unit
 	int seed;
 	int octaves;
-	float lacunarity;
-	float persistence;
+	float lacunarity;  // frequency modulation rate per octave
+	float persistence; // amplitude modulation rate per octave
 };
 
 struct Stats {
@@ -21,6 +21,7 @@ struct Stats {
 	float tTotal;
 };
 
+// Pretty print stats
 inline std::ostream& operator<<(std::ostream& o, const Stats& stats) {
 	const float tot = stats.tTotal;
 	const auto getRatio = [tot] (float part) {
@@ -44,8 +45,6 @@ inline std::ostream& operator<<(std::ostream& o, const Stats& stats) {
 }
 
 class Perlin final {
-	uint8_t *dPixels;
-
 public:
 	Stats calculate(uint8_t *hPixels, NoiseParams params, cudaStream_t *streams, int nStreams);
 };

@@ -7,10 +7,14 @@
 #include <cstdio>
 #include <iostream>
 
+// Precomputed 1 / sqrt(2)
 static constexpr auto INVSQRT2 = .70710678118654752440;
 static constexpr auto N_GRADIENTS = 8;
 
-__device__ int _hash[] = {
+// Reference implementation: http://catlikecoding.com/unity/tutorials/noise/
+
+// Pseudo-random permutation of int's as defined by Ken Perlin in his original reference implementation
+__device__ int _hash[256] = {
 	151,160,137, 91, 90, 15,131, 13,201, 95, 96, 53,194,233,  7,225,
 	140, 36,103, 30, 69,142,  8, 99, 37,240, 21, 10, 23,190,  6,148,
 	247,120,234, 75,  0, 26,197, 62, 94,252,219,203,117, 35, 11, 32,
@@ -29,6 +33,8 @@ __device__ int _hash[] = {
 	222,114, 67, 29, 24, 72,243,141,128,195, 78, 66,215, 61,156,180
 };
 
+// X and Y values of the "base gradients" are stored separately for optimization, as it's faster
+// to pass around SoA than AoS
 __device__ float gradientX[N_GRADIENTS] = {
 	1, -1, 0, 0, INVSQRT2, -INVSQRT2, INVSQRT2, -INVSQRT2
 };
@@ -37,6 +43,8 @@ __device__ float gradientY[N_GRADIENTS] = {
 	0, 0, 1, -1, INVSQRT2, INVSQRT2, -INVSQRT2, -INVSQRT2
 };
 
+// This function (6t^5 - 15t^4 + 10t^3) has null first and second derivative at the "joint points"
+// when used to calculate the distance between x point in the cell and its surrounding corners.
 __inline__ __device__ float smooth(float t) {
 	return t * t * t * (t * (t * 6.f - 15.f) + 10.f);
 }
@@ -77,9 +85,11 @@ __device__ float noiseAt(float x, float y, int seed) {
 	const float dBotLeft  = dot(gBotLeft,  make_float2(wx,     wy - 1));
 	const float dBotRight = dot(gBotRight, make_float2(wx - 1, wy - 1));
 
+	// Calculate the smoothed distance between given point and the top-left corner
 	const float tx = smooth(wx),
 	            ty = smooth(wy);
 
+	// Interpolate with the other corners
 	const float leftInterp  = lerp(dTopLeft, dBotLeft, ty);
 	const float rightInterp = lerp(dTopRight, dBotRight, ty);
 
@@ -126,6 +136,8 @@ Stats Perlin::calculate(uint8_t *hPixels, NoiseParams params, cudaStream_t *stre
 	const auto partialHeight = Displayer::WIN_HEIGHT / nStreams;
 	const dim3 threads(32, 32);
 	const dim3 blocks(std::ceil(Displayer::WIN_WIDTH / 32.0), std::ceil(partialHeight / 32.0));
+	
+	std::cout << "Each stream will calculate " << partialHeight * Displayer::WIN_WIDTH << " pixels." << std::endl;
 
 	cudaEvent_t start, endMalloc, endKernel, endMemcpy;
 	MUST(cudaEventCreate(&start));
@@ -134,17 +146,25 @@ Stats Perlin::calculate(uint8_t *hPixels, NoiseParams params, cudaStream_t *stre
 	MUST(cudaEventCreate(&endMemcpy));
 
 	MUST(cudaEventRecord(start));
+	// Allocate memory on the device
+	uint8_t *dPixels;
 	MUST(cudaMalloc(&dPixels, sizeof(uint8_t) * 4 * Displayer::WIN_WIDTH * Displayer::WIN_HEIGHT));
 	MUST(cudaEventRecord(endMalloc));
 
-	std::cout << "threads = " << threads << ", blocks = " << blocks << " (= " << threads.x * blocks.x * threads.y * blocks.y << ")" << std::endl;
+	std::cout << "threads = " << threads << ", blocks = " << blocks << " (= " <<
+		threads.x * blocks.x * threads.y * blocks.y << ")" << std::endl;
 
+	// Launch kernels. Note that all kernels use the same device pointer, but they all write on
+	// different parts of the pointer memory, so no data race occurs.
 	for (int i = 0; i < nStreams; ++i) {
 		perlin<<<threads, blocks, 0, streams[i]>>>(partialHeight * i, partialHeight, params, dPixels);
 	}
+
+	// Synchronize explicitly, so we have accurate kernel time stats.
 	MUST(cudaDeviceSynchronize());
 	MUST(cudaEventRecord(endKernel));
 
+	// Copy results to host memory
 	MUST(cudaMemcpy(hPixels, dPixels, sizeof(uint8_t) * 4 * Displayer::WIN_WIDTH * Displayer::WIN_HEIGHT,
 				cudaMemcpyDeviceToHost));
 	MUST(cudaEventRecord(endMemcpy));
