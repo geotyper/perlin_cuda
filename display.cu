@@ -39,6 +39,9 @@ bool Displayer::handleEvent(sf::Event evt) {
 		window.setView(keepRatio(evt.size, sf::Vector2u(WIN_WIDTH, WIN_HEIGHT)));
 		_shouldRedraw = true;
 		return true;
+	case sf::Event::GainedFocus:
+		_shouldRedraw = true;
+		return true;
 	case sf::Event::KeyPressed:
 		switch (evt.key.code) {
 		case sf::Keyboard::Q:
