@@ -11,3 +11,7 @@ make
 ### Usage
 A window will open showing the randomly generated Perlin noise. The window
 can be interacted via the controls shown in the legend.
+
+### Authors
+[Giacomo Parolini](https://github.com/silverweed)
+[Ilaria Cislaghi](https://github.com/QbieShay)

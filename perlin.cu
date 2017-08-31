@@ -1,3 +1,6 @@
+// Perlin noise generator and visualizer
+// by G. Parolini && I. Cislaghi
+// 2017
 #include "display.hpp"
 #include "myutils.hpp"
 #include "noise.hpp"
