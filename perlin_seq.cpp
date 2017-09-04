@@ -1,9 +1,8 @@
-// Perlin noise generator and visualizer
+// Perlin noise generator and visualizer - sequential version
 // by G. Parolini && I. Cislaghi
 // 2017
 #include "display.hpp"
-#include "myutils.hpp"
-#include "noise.hpp"
+#include "noise_seq.hpp"
 #include "input.hpp"
 #include <iostream>
 #include <array>
@@ -21,26 +20,15 @@ int main(int argc, char **argv) {
 	params.octaves = 3;
 	params.lacunarity = 2;
 	params.persistence = 0.5;
-	int nStreams = 2;
-	if (argc > 1) {
-		nStreams = std::min(100, atoi(argv[1]));
-	}
-	std::cout << "Using " << nStreams << " CUDA streams." << std::endl;
 
 	Displayer displayer;
 	Input input(params);
 	sf::RenderWindow& window = displayer.getWindow();
-	Perlin perlin;
+	PerlinSeq perlin;
 
-	uint8_t *hPixels;
-	MUST(cudaMallocHost(&hPixels, 4 * Displayer::WIN_WIDTH * Displayer::WIN_HEIGHT * sizeof(uint8_t)));
+	uint8_t *hPixels = new uint8_t[4 * Displayer::WIN_WIDTH * Displayer::WIN_HEIGHT];
 
-	cudaStream_t *streams = new cudaStream_t[nStreams];
-	for (int i = 0; i < nStreams; ++i) {
-		MUST(cudaStreamCreate(&streams[i]));
-	}
-
-	auto stats = perlin.calculate(hPixels, params, streams, nStreams);
+	auto stats = perlin.calculate(hPixels, params);
 	/*for (int i = 0; i < 4 * Displayer::WIN_WIDTH * Displayer::WIN_HEIGHT * sizeof(uint8_t); ++i) {*/
 		/*cout << "pixel[" << i << "] = " << int(hPixels[i]) << endl;*/
 	/*}*/
@@ -49,7 +37,7 @@ int main(int argc, char **argv) {
 	std::cout << stats << std::endl;
 
 	while (window.isOpen()) {
-		
+
 		// Event loop
 		sf::Event evt;
 		bool shouldRecalculate = false;
@@ -66,7 +54,7 @@ int main(int argc, char **argv) {
 
 		if (shouldRecalculate) {
 			// Recalculate perlin
-			stats = perlin.calculate(hPixels, params, streams, nStreams);
+			stats = perlin.calculate(hPixels, params);
 			displayer.update(hPixels);
 			shouldRedraw = true;
 			std::cout << stats << std::endl;
@@ -79,10 +67,5 @@ int main(int argc, char **argv) {
 		usleep(16666);
 	}
 
-	// Cleanup
-	for (int i = 0; i < nStreams; ++i) {
-		MUST(cudaStreamDestroy(streams[i]));
-	}
-	MUST(cudaFreeHost(hPixels));
-	delete[] streams;
+	delete[] hPixels;
 }

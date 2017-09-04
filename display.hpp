@@ -5,7 +5,7 @@
 #include <initializer_list>
 #include <SFML/Graphics.hpp>
 #include <SFML/System.hpp>
-#include "common.hpp"
+#include "event_handler.hpp"
 
 class Displayer final : public EventHandler {
 public:
@@ -29,6 +29,6 @@ public:
 	void update(uint8_t *hPixels);
 	void draw(std::initializer_list<sf::Drawable*> toDraw);
 	bool shouldRedraw() const { return _shouldRedraw; }
-	
+
 	sf::RenderWindow& getWindow() { return window; }
 };

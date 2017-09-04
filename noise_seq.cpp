@@ -1,20 +1,41 @@
-#include "noise.hpp"
+#include "noise_seq.hpp"
 #include "display.hpp"
-#include "myutils.hpp"
-#include <helper_math.h>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
 #include <iostream>
+#include <chrono>
+#include <thread>
+
+#ifndef LIN
+#define LIN(x, y, w) (y * w + x)
+#endif
 
 // Precomputed 1 / sqrt(2)
 static constexpr auto INVSQRT2 = .70710678118654752440;
 static constexpr auto N_GRADIENTS = 8;
 
+struct float2 {
+	float x;
+	float y;
+};
+
+constexpr float2 make_float2(float x, float y) {
+	return {x, y};
+}
+
+constexpr float lerp(float a, float b, float t) {
+    return a + t*(b-a);
+}
+
+constexpr float dot(float2 a, float2 b) {
+    return a.x * b.x + a.y * b.y;
+}
+
 // Reference implementation: http://catlikecoding.com/unity/tutorials/noise/
 
 // Pseudo-random permutation of int's as defined by Ken Perlin in his original reference implementation
-__device__ int _hash[256] = {
+static const int _hash[256] = {
 	151,160,137, 91, 90, 15,131, 13,201, 95, 96, 53,194,233,  7,225,
 	140, 36,103, 30, 69,142,  8, 99, 37,240, 21, 10, 23,190,  6,148,
 	247,120,234, 75,  0, 26,197, 62, 94,252,219,203,117, 35, 11, 32,
@@ -35,17 +56,17 @@ __device__ int _hash[256] = {
 
 // X and Y values of the "base gradients" are stored separately for optimization, as it's faster
 // to pass around SoA than AoS
-__device__ float gradientX[N_GRADIENTS] = {
+static const float gradientX[N_GRADIENTS] = {
 	1, -1, 0, 0, INVSQRT2, -INVSQRT2, INVSQRT2, -INVSQRT2
 };
 
-__device__ float gradientY[N_GRADIENTS] = {
+static const float gradientY[N_GRADIENTS] = {
 	0, 0, 1, -1, INVSQRT2, INVSQRT2, -INVSQRT2, -INVSQRT2
 };
 
 // This function (6t^5 - 15t^4 + 10t^3) has null first and second derivative at the "joint points"
 // when used to calculate the distance between x point in the cell and its surrounding corners.
-__inline__ __device__ float smooth(float t) {
+constexpr float smooth(float t) {
 	return t * t * t * (t * (t * 6.f - 15.f) + 10.f);
 }
 
@@ -54,8 +75,8 @@ __inline__ __device__ float smooth(float t) {
  * @param y Grid coordinate y (top-left = (0, 0))
  * @return Perlin noise at coordinate (x, y).
  */
-__device__ float noiseAt(float x, float y, int seed) {
-	
+float noiseAt(float x, float y, int seed) {
+
 	// Get top-left corner indices
 	const int ix = static_cast<int>(x),
 	          iy = static_cast<int>(y);
@@ -100,7 +121,7 @@ __device__ float noiseAt(float x, float y, int seed) {
 /* Calculates several octaves of Perlin noise at coordinate (x, y)
  * (according to the given `params`), sums them together and returns the result.
  */
-__device__ float sumOctaves(float x, float y, NoiseParams params) {
+float sumOctaves(float x, float y, NoiseParams params) {
 	float frequency = 1;
 	float sum = noiseAt(x * frequency , y * frequency, params.seed);
 	float amplitude = 1;
@@ -114,15 +135,14 @@ __device__ float sumOctaves(float x, float y, NoiseParams params) {
 	return sum / range;
 }
 
-__global__ void perlin(int yStart, int height, NoiseParams params, uint8_t *outPixels) {
-	// Pixel coordinates
-	const auto px = CUID(x);
-	const auto py = CUID(y) + yStart;
+/* @param px Pixel coordinate x
+ * @param py Pixel coordinate y
+ * @param params Noise parameters
+ * @param outPixels (out parameter) calculated pixels
+ */
+void perlin(int px, int py, NoiseParams params, uint8_t *outPixels) {
 
-	if (px >= Displayer::WIN_WIDTH || py >= yStart + height)
-		return;
-
-	auto noise = sumOctaves(px / params.ppu, py / params.ppu, params);
+	const auto noise = sumOctaves(px / params.ppu, py / params.ppu, params);
 
 	// Convert noise to pixel
 	const auto baseIdx = 4 * LIN(px, py, Displayer::WIN_WIDTH);
@@ -135,67 +155,39 @@ __global__ void perlin(int yStart, int height, NoiseParams params, uint8_t *outP
 	outPixels[baseIdx + 3] = 255;
 }
 
-Stats Perlin::calculate(uint8_t *hPixels, NoiseParams params, cudaStream_t *streams, int nStreams) {
-	
-	const auto partialHeight = Displayer::WIN_HEIGHT / nStreams;
-	const dim3 threads(32, 32);
-	const dim3 blocks(std::ceil(Displayer::WIN_WIDTH / 32.0), std::ceil(partialHeight / 32.0));
-	
-	std::cout << "Each stream will calculate " << partialHeight * Displayer::WIN_WIDTH << " pixels." << std::endl;
+inline void launchPerlin(uint8_t *hPixels, NoiseParams params, int startX, int nX, int startY, int nY) {
+	for (int x = startX; x < startX + nX; ++x)
+		for (int y = startY; y < startY + nY; ++y)
+			perlin(x, y, params, hPixels);
+}
 
-	cudaEvent_t start, endMalloc, endKernel, endMemcpy;
-	MUST(cudaEventCreate(&start));
-	MUST(cudaEventCreate(&endMalloc));
-	MUST(cudaEventCreate(&endKernel));
-	MUST(cudaEventCreate(&endMemcpy));
+Stats PerlinSeq::calculate(uint8_t *hPixels, NoiseParams params) {
 
-	MUST(cudaEventRecord(start));
-	// Allocate memory on the device
-	uint8_t *dPixels;
-	MUST(cudaMalloc(&dPixels, sizeof(uint8_t) * 4 * Displayer::WIN_WIDTH * Displayer::WIN_HEIGHT));
-	MUST(cudaEventRecord(endMalloc));
+	const auto start = std::chrono::high_resolution_clock::now();
 
-	std::cout << "threads = " << threads << ", blocks = " << blocks << " (= " <<
-		threads.x * blocks.x * threads.y * blocks.y << ")" << std::endl;
-
-	// Launch kernels. Note that all kernels use the same device pointer, but they all write on
-	// different parts of the pointer memory, so no data race occurs.
-	for (int i = 0; i < nStreams; ++i) {
-		perlin<<<threads, blocks, 0, streams[i]>>>(partialHeight * i, partialHeight, params, dPixels);
-	}
-
-	// Synchronize explicitly, so we have accurate kernel time stats.
-	MUST(cudaDeviceSynchronize());
-	MUST(cudaEventRecord(endKernel));
-
-	// Copy results to host memory
-	MUST(cudaMemcpy(hPixels, dPixels, sizeof(uint8_t) * 4 * Displayer::WIN_WIDTH * Displayer::WIN_HEIGHT,
-				cudaMemcpyDeviceToHost));
-	MUST(cudaEventRecord(endMemcpy));
-
-	MUST(cudaEventSynchronize(start));
-	MUST(cudaEventSynchronize(endMalloc));
-	MUST(cudaEventSynchronize(endKernel));
-	MUST(cudaEventSynchronize(endMemcpy));
+	const int hw = Displayer::WIN_WIDTH / 4, hh = Displayer::WIN_HEIGHT / 2;
+	std::thread t1(launchPerlin, hPixels, params, 0, hw, 0, hh);
+	std::thread t2(launchPerlin, hPixels, params, hw, hw, 0, hh);
+	std::thread t3(launchPerlin, hPixels, params, 2 * hw, hw, 0, hh);
+	std::thread t4(launchPerlin, hPixels, params, 3 * hw, hw, 0, hh);
+	std::thread t5(launchPerlin, hPixels, params, 0, hw, hh, hh);
+	std::thread t6(launchPerlin, hPixels, params, hw, hw, hh, hh);
+	std::thread t7(launchPerlin, hPixels, params, 2 * hw, hw, hh, hh);
+	std::thread t8(launchPerlin, hPixels, params, 3 * hw, hw, hh, hh);
+	t1.join();
+	t2.join();
+	t3.join();
+	t4.join();
+	t5.join();
+	t6.join();
+	t7.join();
+	t8.join();
+	const auto end = std::chrono::high_resolution_clock::now();
 
 	// Collect stats
-	float tMalloc, tKernel, tMemcpy;
-	MUST(cudaEventElapsedTime(&tMalloc, start, endMalloc));
-	MUST(cudaEventElapsedTime(&tKernel, start, endKernel));
-	MUST(cudaEventElapsedTime(&tMemcpy, start, endMemcpy));
 	Stats stats;
-	stats.tMalloc = tMalloc;
-	stats.tKernel = tKernel - tMalloc;
-	stats.tMemcpy = tMemcpy - tMalloc - tKernel;
-	stats.tTotal = tMemcpy;
-	
+	stats.tTotal = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+
 	// Cleanup
-	MUST(cudaFree(dPixels));
-
-	MUST(cudaEventDestroy(endMemcpy));
-	MUST(cudaEventDestroy(endKernel));
-	MUST(cudaEventDestroy(endMalloc));
-	MUST(cudaEventDestroy(start));
-
 	return stats;
 }

@@ -1,8 +1,8 @@
 #pragma once
 
 #include <SFML/Graphics.hpp>
-#include "common.hpp"
-#include "noise.hpp"
+#include "event_handler.hpp"
+#include "noise_params.hpp"
 
 class Input final : public EventHandler, public sf::Drawable {
 	NoiseParams& params;
